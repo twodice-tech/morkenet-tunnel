@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS System Extension Info.plist for the Morke packet tunnel (T-MAC-2 Phase B).
+
+  DIVERGES from the iOS appex (MorkeTunnel/Info.plist): a macOS system extension declares
+  its provider via the `NetworkExtension` dict + `NEProviderClasses` + `NEMachServiceName`,
+  NOT the appex `NSExtension` / `NSExtensionPointIdentifier` keys, and its package type is
+  `SYSX` (never the iOS appex `XPC!`).
+
+  Shape verified against sing-box-for-apple's macOS SystemExtension/Info.plist. Lives in the
+  non-synchronized Config/ group (not MorkeTunnel/) so the iOS appex's synchronized folder can
+  never copy it into the iOS bundle. Hand-maintained: GENERATE_INFOPLIST_FILE = NO.
+
+  Runtime correctness (the NEProviderClasses mapping, NEMachServiceName rendezvous) is Phase C
+  on a signed/notarized build; this file only has to let the target build + embed.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Morke</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>SYSX</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSSystemExtensionUsageDescription</key>
+	<string>Morke routes your network traffic through its secure VPN tunnel.</string>
+	<key>NetworkExtension</key>
+	<dict>
+		<!-- Mach service the containing app uses to reach the extension. Apple requires an
+		     App Group as the prefix (verified against sing-box-for-apple, which uses
+		     $(APP_GROUP_IDENTIFIER).system). Morke's App Group is group.tech.twodice.morke. -->
+		<key>NEMachServiceName</key>
+		<string>group.tech.twodice.morke.tunnel</string>
+		<key>NEProviderClasses</key>
+		<dict>
+			<!-- Bare principal name matches @objc(PacketTunnelProvider) in PacketTunnelProvider.swift. -->
+			<key>com.apple.networkextension.packet-tunnel</key>
+			<string>PacketTunnelProvider</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

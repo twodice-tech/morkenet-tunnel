@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Privacy manifest for the MorkeTunnel iOS APPEX bundle (T-REL-9).
+	     Separate from the app's (Config/PrivacyInfo.xcprivacy) because a manifest describes
+	     the bundle it ships in, and this bundle links different code.
+
+	     All three categories below come from Frameworks/Libbox.xcframework, not from our
+	     Swift/C/ObjC — which contains none of these APIs. The shipping ios-arm64 slice is a
+	     STATIC archive ("current ar archive") carrying no manifest of its own, so libbox's
+	     symbols become this bundle's to declare. Measured on the LINKED Release arm64
+	     appex binary 2026-08-31: _stat _fstat _fstatat _lstat _statfs _statvfs
+	     _mach_absolute_time all survive linking (nothing is dead-stripped), and there is no
+	     getattrlist-family symbol and no UserDefaults reference — so those categories are
+	     deliberately NOT declared here.
+
+	     This file is a bundle RESOURCE, not a linked dependency: MorkeTunnel still links only
+	     MorkeShared, and the NE memory budget is untouched. -->
+
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!-- _stat _fstat _fstatat _lstat, from libbox.
+			     C617.1 is "metadata of files inside the app container, app group container, or
+			     the app's CloudKit container". SingBoxTunnel.start puts every path libbox
+			     touches inside the App Group container: basePath = container,
+			     workingPath = container/Working, tempPath = container/Library/Caches, plus the
+			     cache_file (cache.db) the config validator allow-lists — see
+			     MorkeServices/VPN/TunnelWorkspace.swift, which wipes exactly those paths.
+			     NOT DDA9.1 (no file timestamp is ever displayed), NOT 3B52.1 (no document
+			     picker), NOT 0A2A.1 (third-party-SDK-only reason; this is the app's bundle). -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<dict>
+			<!-- _statfs _statvfs, from libbox. The callers in the linked binary are
+			     base::SysInfo::AmountOfFreeDiskSpace / AmountOfTotalDiskSpace (the vendored
+			     tracing library, checking free space before writing trace files) and
+			     sftp.getStatVFSForPath / StatVFS.FreeSpace (a vendored SFTP library's protocol
+			     handler), reached through Go's syscall.Statfs. E174.1 is "check whether there is
+			     sufficient disk space to write files" — that is what the reachable code does with
+			     the API. Its off-device clause holds absolutely here: nothing derived from disk
+			     space is logged, surfaced or sent anywhere.
+			     NOT 85F4.1 (disk space is never displayed), NOT 7D9E.1 (no bug-report path),
+			     NOT B728.1 (not a health-research app).
+			     ⚠️ Maintainer: E174.1 also carries "the app must behave differently based on disk
+			     space in a way that is observable to users". Morke does not — these are dormant
+			     library paths we neither call nor can strip from a vendored static archive. The
+			     first clause matches the code's purpose and no other DiskSpace reason fits at
+			     all; leaving the category undeclared would instead trip ITMS-91053, since the
+			     symbols are provably in the shipping binary. Flagged rather than settled. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>E174.1</string>
+			</array>
+		</dict>
+		<dict>
+			<!-- _mach_absolute_time, from libbox: Go's monotonic clock (runtime.nanotime, backing
+			     timers, deadlines and time.Since) plus the vendored tracing library's clock.
+			     35F9.1 is "measure the amount of time that has elapsed between events that
+			     occurred within the app or to perform calculations to enable timers" — exactly
+			     what a monotonic clock is used for here. Its "may not be sent off-device" clause
+			     is satisfied by the project's privacy posture: no per-user analytics, no
+			     behavioural tracking, no remote crash reporter, and the operational-health
+			     metrics are in-memory + os_log with zero network egress.
+			     NOT 8FFB.1 (no absolute event timestamps are calculated or sent off-device),
+			     NOT 3D61.1 (no user-submitted bug report carries boot time). -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- EMPTY, and that is a measured claim rather than a default. The published App Privacy label
+	     (read from the ASC web console 2026-08-31) names Purchase History / User ID / Device ID —
+	     all three are collected by the APP, whose manifest declares them. This extension collects
+	     none of them: it makes no control-plane call at all. MorkeTunnel/ contains no URLSession
+	     and no API base URL, and MorkeShared — the only module it links — contains no URLSession
+	     either; the sing-box config reaches it through the shared Keychain, written by the app,
+	     "never by a fetch from the extension" (T-CFG-41). Apple aggregates the bundles' manifests
+	     into one Privacy Report, so declaring the app's three types here as well would over-state
+	     what the tunnel does. -->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+</dict>
+</plist>
