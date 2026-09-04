@@ -11,7 +11,20 @@ GPL-3.0-or-later. Shipping that through the App Store is **conveying**, and GPLv
 terms to anyone who comes into possession of a copy. § 6 then requires us to
 offer the source. This is that offer, discharged by publication.
 
-**Pinned engine: sing-box `v1.13.13`.**
+**Pinned engine: sing-box `v1.13.13`, modified.** We do not ship upstream's build.
+The engine is trimmed to the protocols this client can actually reach, and the
+modification is published here as a 271-line patch against upstream commit
+`83b73048ff772b919af18653b78ffeaa2d48b66e` — see
+[`singbox-fork/`](singbox-fork/) and [BUILD.md § 1](BUILD.md). GPLv3 § 5(a)
+requires us to say that the work is modified and to date it; that date is
+**2026-09-04**, and every file the patch touches carries the notice in its own
+header.
+
+**Licence: GNU GPL v3 or later.** The text is [`LICENSE`](LICENSE), verbatim and
+unmodified. What it covers, what it deliberately does *not* reach, the one module
+that is dual-licensed, and why an automatic detector may label this repository
+`GPL-3.0-only` when our position is `-or-later` — all of that is in
+[**`COPYING-SCOPE.md`**](COPYING-SCOPE.md). **Read it before the licence itself.**
 
 ---
 
@@ -26,9 +39,11 @@ offer the source. This is that offer, discharged by publication.
 | `MorkeTunnel/MorkeTunnel-Bridging-Header.h` | Swift ↔ Objective-C bridging header |
 | `MorkeTunnel/Info.plist`, `*.entitlements`, `PrivacyInfo.xcprivacy` | the bundle configuration and build inputs needed to generate and install the extension |
 | `MorkeShared/` | the app↔extension surface module the extension links: App Group keys, shared-Keychain accessors, the opaque configuration wrapper, the `os_log` subsystem, the diagnostics wire types |
-| `LICENSE` | GNU GPL v3, with an explicit scope notice at the top |
-| `BUILD.md` | how to build libbox from the pinned tag, and the extension's complete build configuration |
+| `LICENSE` | the GNU GPL v3 text, verbatim and alone — nothing added before or after it |
+| `COPYING-SCOPE.md` | what that licence covers and what it does not: the perimeter, the dual-licensed module, the sing-box naming term, and the `-only` / `-or-later` label question |
+| `BUILD.md` | how to build libbox from the pinned tag **plus our patch**, how to verify the result to the byte, and the extension's complete build configuration |
 | `MANIFEST.md` | the rule that decides what belongs in this repository, and the resolved file list with digests |
+| `singbox-fork/` | our modification to sing-box, as a patch against the upstream tag, plus the digest checker BUILD.md § 2.3 uses |
 
 ## What is *not* here, and why
 
@@ -42,7 +57,7 @@ of it is compiled into the extension and none of it is therefore covered by
 - the server node list, the routing logic and every piece of backend knowledge;
 - the Morke backend service itself;
 - the Morke name, logo, icons and artwork, which are trademarks and are not
-  licensed by `LICENSE` at all.
+  licensed by `LICENSE` or by [`COPYING-SCOPE.md`](COPYING-SCOPE.md) at all.
 
 **The copyleft boundary is set by linking, not by repository layout.** This
 repository exists to make § 6 satisfiable and § 5(c) legible. Splitting the
@@ -54,7 +69,8 @@ source did not create the boundary and does not move it.
 extension and the closed-source client. As the copyright holder we license it
 twice: to you under the GPL, unconditionally, and to ourselves under our own
 terms for the closed half. The first grant is not narrowed by the second. Every
-file in `MorkeShared/` says so in its own header, and `LICENSE` says so again.
+file in `MorkeShared/` says so in its own header, and
+[`COPYING-SCOPE.md`](COPYING-SCOPE.md) says so again.
 
 ## Reading the comments
 
@@ -78,13 +94,22 @@ that was made and recorded, not as a missing file.
 The engine this extension links is not one project. The significant set, each
 read at the pinned tag or at the linked module's own `LICENSE`:
 
-| Component | Licence |
-|---|---|
-| `sagernet/sing-box`, `sing`, `sing-tun`, `sing-vmess`, `sing-quic`, `sing-mux`, `sing-shadowsocks`, `cronet-go` | GPL-3.0-or-later, plus a naming clause |
-| `anytls/sing-anytls` | GPL-3.0-or-later |
-| `sagernet/gvisor` | Apache-2.0 |
-| `sagernet/quic-go`, `sagernet/wireguard-go`, `sagernet/smux` | MIT |
-| `metacubex/utls`, `sagernet/tailscale`, `sagernet/gomobile` | BSD-3-Clause |
+| Component | Licence | In the trimmed build? |
+|---|---|---|
+| `sagernet/sing-box`, `sing`, `sing-tun`, `sing-vmess`, `sing-mux` | GPL-3.0-or-later, plus a naming clause | linked |
+| `sagernet/sing-quic`, `sing-shadowsocks`, `cronet-go` | GPL-3.0-or-later, plus a naming clause | no longer linked |
+| `anytls/sing-anytls` | GPL-3.0-or-later | no longer linked |
+| `sagernet/gvisor` | Apache-2.0 | linked |
+| `sagernet/smux` | MIT | linked |
+| `sagernet/quic-go`, `sagernet/wireguard-go` | MIT | no longer linked |
+| `metacubex/utls`, `sagernet/gomobile` | BSD-3-Clause | linked |
+| `sagernet/tailscale` | BSD-3-Clause | no longer linked (iOS); still linked in the macOS slice |
+
+The right-hand column is a fact about *this* build, recorded because the patch in
+`singbox-fork/` is what changed it. It is **not** a licence claim and nothing is
+being withdrawn: the notices for every component above stay reproduced here and
+in the application, because over-attribution costs a reader nothing and dropping
+a notice is the one direction § 4 does not forgive.
 
 The sing-box licence appends a term we reproduce because § 4 requires notices to
 be kept intact: *"no derivative work may use the name or imply association with
@@ -111,10 +136,19 @@ source tree proves what is in a downloaded `.ipa` is overstating it.
 
 What *can* be checked independently, and is worth more than a promise:
 
-1. **The libbox artefact.** Build `Libbox.xcframework` from tag `v1.13.13` by the
-   recipe in `BUILD.md` and compare its SHA-256 with ours. That covers the half
-   the GPL claim actually rests on — the engine — without depending on anything
-   we assert.
+1. **The libbox artefact, and this one is exact.** Clone tag `v1.13.13`, apply
+   `singbox-fork/0001-morke-trim.patch`, build by the recipe in `BUILD.md § 2`,
+   and run `singbox-fork/libbox-digest.py` over the result. It should print the
+   digests in `BUILD.md § 2.3`, byte for byte. We have run that comparison across
+   two builds from different directories: the `Libbox` static libraries came out
+   **identical except for three bytes** — the ASCII timestamp `libtool` stamps
+   into the `ar` symbol-index header, which is what the digest script blanks. So
+   this is not a "should roughly match": the engine half of the GPL claim is
+   verifiable to the byte, without depending on anything we assert.
+
+   Note that **building the upstream tag alone will not match**, and must not:
+   we ship a modified engine, the patch is the modification, and a digest that
+   matched upstream would mean the patch had not been applied.
 2. **The absence of a network client in the extension.** The shipped appex
    contains no `URLSession` and no API base URL; it makes no control-plane call
    at all. That is checkable on a decrypted binary with no source whatsoever, and

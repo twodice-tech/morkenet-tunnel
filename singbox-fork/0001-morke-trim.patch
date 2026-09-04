@@ -1,0 +1,271 @@
+diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/internal/build_libbox/main.go sing-box-morke/cmd/internal/build_libbox/main.go
+--- a/cmd/internal/build_libbox/main.go	2026-06-07 19:05:39
++++ b/cmd/internal/build_libbox/main.go	2026-09-04 11:13:08
+@@ -1,3 +1,18 @@
++// Modified on 2026-09-04 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.13.13:
++//   - buildApple: the Apple bind target drops `tvos` and `tvossimulator`.
++//   - sharedTags: `with_quic`, `with_wireguard`, `with_naive_outbound`, `with_tailscale` and the
++//     `ts_omit_*` tags that only qualify it are removed.
++//   - darwinTags: `with_dhcp` is removed.
++//   - the version stamped into constant.Version is a fixed fork string rather than `git describe`,
++//     so the build does not depend on VCS state and is byte-stable across rebuilds.
++//
++// `with_clash_api` is DELIBERATELY RETAINED — see the comment above sharedTags.
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
++
+ package main
+ 
+ import (
+@@ -16,6 +31,9 @@
+ 	"github.com/sagernet/sing/common/shell"
+ )
+ 
++// ForkVersion is stamped into constant.Version. Bump the suffix when the fork changes.
++const ForkVersion = "1.13.13-morke.1"
++
+ var (
+ 	debugEnabled bool
+ 	target       string
+@@ -56,17 +74,36 @@
+ func init() {
+ 	sharedFlags = append(sharedFlags, "-trimpath")
+ 	sharedFlags = append(sharedFlags, "-buildvcs=false")
+-	currentTag, err := build_shared.ReadTag()
+-	if err != nil {
+-		currentTag = "unknown"
+-	}
++	// Morke: a fixed fork version. Upstream shells out to `git describe --tags`, which makes the
++	// build depend on VCS state the published Corresponding Source does not carry, and makes the
++	// resulting archive differ between an in-tree build and a build from an exported tarball. The
++	// string names the upstream base it is derived from, as GPLv3 section 5(a) provenance.
++	currentTag := ForkVersion
+ 	sharedFlags = append(sharedFlags, "-ldflags", "-X github.com/sagernet/sing-box/constant.Version="+currentTag+" -X internal/godebug.defaultGODEBUG=multipathtcp=0 -s -w -buildid=  -checklinkname=0")
+ 	debugFlags = append(debugFlags, "-ldflags", "-X github.com/sagernet/sing-box/constant.Version="+currentTag+" -X internal/godebug.defaultGODEBUG=multipathtcp=0 -checklinkname=0")
+ 
+-	sharedTags = append(sharedTags, "with_gvisor", "with_quic", "with_wireguard", "with_utls", "with_naive_outbound", "with_clash_api", "badlinkname", "tfogo_checklinkname0")
+-	darwinTags = append(darwinTags, "with_dhcp", "grpcnotrace")
+-	// memcTags = append(memcTags, "with_tailscale")
+-	sharedTags = append(sharedTags, "with_tailscale", "ts_omit_logtail", "ts_omit_ssh", "ts_omit_drive", "ts_omit_taildrop", "ts_omit_webclient", "ts_omit_doctor", "ts_omit_capture", "ts_omit_kube", "ts_omit_aws", "ts_omit_synology", "ts_omit_bird")
++	// Morke: the optional-feature tag set is cut to what the client's own config contract can
++	// reach. SingBoxConfigValidator allows exactly {vless, direct, block, dns} as egress, `tun` as
++	// the only ingress, no `endpoints`, and no `experimental` key but `cache_file`; /auth/config
++	// emits VLESS-REALITY over `tun` with a DoT resolver. So:
++	//   with_gvisor  KEPT — the kill switch (includeAllNetworks) forces tun.stack = "gvisor".
++	//   with_utls    KEPT — REALITY is built on uTLS; removing it removes the proxy.
++	//   with_quic    REMOVED — hysteria / hysteria2 / tuic egress and the DoQ / DoH3 resolvers.
++	//                Not in the egress allow-set; the resolver is DoT.
++	//   with_wireguard REMOVED — an `endpoints` type, and the validator refuses every endpoint.
++	//   with_tailscale REMOVED — likewise an endpoint, plus a DERP service and a cert provider.
++	//                The ts_omit_* tags only qualified it and go with it.
++	//   with_naive_outbound REMOVED — not in the egress allow-set. It also links a 42 MB
++	//                prebuilt Chromium libcronet.a.
++	//   with_dhcp    REMOVED — a DHCP-discovered DNS transport; the resolver is server-templated.
++	//
++	// with_clash_api is RETAINED, and that is not an oversight. daemon/instance.go always passes a
++	// PlatformLogWriter to box.New, and box.go turns that into needClashAPI, so a libbox build
++	// without the tag fails every start with "create clash-server: invalid argument". Removing it
++	// needs a change to box.go AND to daemon/started_service.go, which imports experimental/clashapi
++	// unconditionally — i.e. the tag alone does not unlink the package either way.
++	sharedTags = append(sharedTags, "with_gvisor", "with_utls", "with_clash_api", "badlinkname", "tfogo_checklinkname0")
++	darwinTags = append(darwinTags, "grpcnotrace")
+ 	notMemcTags = append(notMemcTags, "with_low_memory")
+ 	debugTags = append(debugTags, "debug")
+ }
+@@ -195,7 +232,9 @@
+ 	} else if debugEnabled {
+ 		bindTarget = "ios"
+ 	} else {
+-		bindTarget = "ios,iossimulator,tvos,tvossimulator,macos"
++		// Morke: tvOS slices dropped — there is no tvOS target in the Xcode project, so they were
++		// never linked into any shipped binary and only cost local disk.
++		bindTarget = "ios,iossimulator,macos"
+ 	}
+ 
+ 	args := []string{
+diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/internal/sizeprobe/main.go sing-box-morke/cmd/internal/sizeprobe/main.go
+--- a/cmd/internal/sizeprobe/main.go	1970-01-01 01:00:00
++++ b/cmd/internal/sizeprobe/main.go	2026-09-04 11:04:27
+@@ -0,0 +1,13 @@
++// Size probe: links exactly what experimental/libbox links, so tag/registry changes
++// can be measured in seconds instead of a full gomobile bind.
++package main
++
++import (
++	"fmt"
++
++	"github.com/sagernet/sing-box/experimental/libbox"
++)
++
++func main() {
++	fmt.Println(libbox.Version())
++}
+diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/include/registry.go sing-box-morke/include/registry.go
+--- a/include/registry.go	2026-06-07 19:05:39
++++ b/include/registry.go	2026-09-04 11:11:54
+@@ -1,45 +1,37 @@
++// Modified on 2026-09-04 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.13.13:
++//   - InboundRegistry: only `tun` is registered.
++//   - OutboundRegistry: only `direct`, `block` and `vless` are registered.
++//   - ServiceRegistry: `ssm-api` is no longer registered.
++//   - CertificateProviderRegistry: `cloudflare-origin-ca` is no longer registered.
++//   - registerStubForRemovedInbounds / registerStubForRemovedOutbounds removed with their callers.
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
++
+ package include
+ 
+ import (
+ 	"context"
+ 
+ 	"github.com/sagernet/sing-box"
+-	"github.com/sagernet/sing-box/adapter"
+ 	"github.com/sagernet/sing-box/adapter/certificate"
+ 	"github.com/sagernet/sing-box/adapter/endpoint"
+ 	"github.com/sagernet/sing-box/adapter/inbound"
+ 	"github.com/sagernet/sing-box/adapter/outbound"
+ 	"github.com/sagernet/sing-box/adapter/service"
+-	C "github.com/sagernet/sing-box/constant"
+ 	"github.com/sagernet/sing-box/dns"
+ 	"github.com/sagernet/sing-box/dns/transport"
+ 	"github.com/sagernet/sing-box/dns/transport/fakeip"
+ 	"github.com/sagernet/sing-box/dns/transport/hosts"
+ 	"github.com/sagernet/sing-box/dns/transport/local"
+ 	"github.com/sagernet/sing-box/dns/transport/mdns"
+-	"github.com/sagernet/sing-box/log"
+-	"github.com/sagernet/sing-box/option"
+-	"github.com/sagernet/sing-box/protocol/anytls"
+ 	"github.com/sagernet/sing-box/protocol/block"
+ 	"github.com/sagernet/sing-box/protocol/direct"
+-	"github.com/sagernet/sing-box/protocol/group"
+-	"github.com/sagernet/sing-box/protocol/http"
+-	"github.com/sagernet/sing-box/protocol/mixed"
+-	"github.com/sagernet/sing-box/protocol/naive"
+-	"github.com/sagernet/sing-box/protocol/redirect"
+-	"github.com/sagernet/sing-box/protocol/shadowsocks"
+-	"github.com/sagernet/sing-box/protocol/shadowtls"
+-	"github.com/sagernet/sing-box/protocol/socks"
+-	"github.com/sagernet/sing-box/protocol/ssh"
+-	"github.com/sagernet/sing-box/protocol/tor"
+-	"github.com/sagernet/sing-box/protocol/trojan"
+ 	"github.com/sagernet/sing-box/protocol/tun"
+ 	"github.com/sagernet/sing-box/protocol/vless"
+-	"github.com/sagernet/sing-box/protocol/vmess"
+-	originca "github.com/sagernet/sing-box/service/origin_ca"
+ 	"github.com/sagernet/sing-box/service/resolved"
+-	"github.com/sagernet/sing-box/service/ssmapi"
+-	E "github.com/sagernet/sing/common/exceptions"
+ )
+ 
+ func Context(ctx context.Context) context.Context {
+@@ -49,26 +41,16 @@
+ func InboundRegistry() *inbound.Registry {
+ 	registry := inbound.NewRegistry()
+ 
++	// Morke: `tun` is the ONLY ingress this client accepts. SingBoxConfigValidator invariant (d)
++	// refuses every other inbound type, because each of them binds a listening socket inside the
++	// Network Extension. Every other RegisterInbound call upstream makes is deleted here, so an
++	// unexpected inbound type now fails to decode ("unknown inbound type") instead of being
++	// constructed. The `registerQUIC*` / `registerCloudflared*` calls below resolve to upstream's
++	// own not-included stubs, which register an error-returning constructor.
+ 	tun.RegisterInbound(registry)
+-	redirect.RegisterRedirect(registry)
+-	redirect.RegisterTProxy(registry)
+-	direct.RegisterInbound(registry)
+ 
+-	socks.RegisterInbound(registry)
+-	http.RegisterInbound(registry)
+-	mixed.RegisterInbound(registry)
+-
+-	shadowsocks.RegisterInbound(registry)
+-	vmess.RegisterInbound(registry)
+-	trojan.RegisterInbound(registry)
+-	naive.RegisterInbound(registry)
+-	shadowtls.RegisterInbound(registry)
+-	vless.RegisterInbound(registry)
+-	anytls.RegisterInbound(registry)
+-
+ 	registerQUICInbounds(registry)
+ 	registerCloudflaredInbound(registry)
+-	registerStubForRemovedInbounds(registry)
+ 
+ 	return registry
+ }
+@@ -76,27 +58,18 @@
+ func OutboundRegistry() *outbound.Registry {
+ 	registry := outbound.NewRegistry()
+ 
++	// Morke: the egress allow-set is exactly SingBoxConfigValidator.allowedOutboundTypes minus
++	// `dns`, which upstream v1.13.13 does not register as an outbound at all (protocol/dns is a
++	// helper for the `hijack-dns` route action; see route/dns.go). `vless` is the proxy egress that
++	// route.final must resolve to; `direct` is added by the split-tunnel merge and sometimes sent by
++	// the server; `block` is a sink. selector / urltest and every other protocol upstream registers
++	// are deleted: the validator refuses them, so they were unreachable code in a shipped build.
+ 	direct.RegisterOutbound(registry)
+-
+ 	block.RegisterOutbound(registry)
+-
+-	group.RegisterSelector(registry)
+-	group.RegisterURLTest(registry)
+-
+-	socks.RegisterOutbound(registry)
+-	http.RegisterOutbound(registry)
+-	shadowsocks.RegisterOutbound(registry)
+-	vmess.RegisterOutbound(registry)
+-	trojan.RegisterOutbound(registry)
+-	registerNaiveOutbound(registry)
+-	tor.RegisterOutbound(registry)
+-	ssh.RegisterOutbound(registry)
+-	shadowtls.RegisterOutbound(registry)
+ 	vless.RegisterOutbound(registry)
+-	anytls.RegisterOutbound(registry)
+ 
++	registerNaiveOutbound(registry)
+ 	registerQUICOutbounds(registry)
+-	registerStubForRemovedOutbounds(registry)
+ 
+ 	return registry
+ }
+@@ -133,8 +106,11 @@
+ func ServiceRegistry() *service.Registry {
+ 	registry := service.NewRegistry()
+ 
++	// Morke: `ssm-api` deleted — a Shadowsocks server-management HTTP listener, in the same
++	// class as clash_api. /auth/config never emits a `services` array (api.md §POST
++	// /api/v1/auth/config), so it was unreachable. `resolved` stays: dns/transport/local
++	// and the DNS registry below already link service/resolved.
+ 	resolved.RegisterService(registry)
+-	ssmapi.RegisterService(registry)
+ 
+ 	registerQUICServices(registry)
+ 	registerDERPService(registry)
+@@ -150,22 +126,7 @@
+ 
+ 	registerACMECertificateProvider(registry)
+ 	registerTailscaleCertificateProvider(registry)
+-	originca.RegisterCertificateProvider(registry)
++	// Morke: `cloudflare-origin-ca` deleted — /auth/config never emits a `certificate` block.
+ 
+ 	return registry
+-}
+-
+-func registerStubForRemovedInbounds(registry *inbound.Registry) {
+-	inbound.Register[option.ShadowsocksInboundOptions](registry, C.TypeShadowsocksR, func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksInboundOptions) (adapter.Inbound, error) {
+-		return nil, E.New("ShadowsocksR is deprecated and removed in sing-box 1.6.0")
+-	})
+-}
+-
+-func registerStubForRemovedOutbounds(registry *outbound.Registry) {
+-	outbound.Register[option.ShadowsocksROutboundOptions](registry, C.TypeShadowsocksR, func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksROutboundOptions) (adapter.Outbound, error) {
+-		return nil, E.New("ShadowsocksR is deprecated and removed in sing-box 1.6.0")
+-	})
+-	outbound.Register[option.StubOptions](registry, C.TypeWireGuard, func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.StubOptions) (adapter.Outbound, error) {
+-		return nil, E.New("WireGuard outbound is deprecated in sing-box 1.11.0 and removed in sing-box 1.13.0, use WireGuard endpoint instead")
+-	})
+ }

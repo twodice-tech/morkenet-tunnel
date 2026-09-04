@@ -12,52 +12,109 @@ Read [README.md](README.md) first for what this repository is and is not.
 
 ## 1. The pin
 
-**sing-box `v1.13.13`** — tag `v1.13.13` in
-[`SagerNet/sing-box`](https://github.com/SagerNet/sing-box/tree/v1.13.13).
+**sing-box `v1.13.13`, plus the Morke patch series** — upstream tag `v1.13.13` in
+[`SagerNet/sing-box`](https://github.com/SagerNet/sing-box/tree/v1.13.13), commit
+`83b73048ff772b919af18653b78ffeaa2d48b66e`, with `singbox-fork/0001-morke-trim.patch`
+applied on top.
 
-This is an exact tag, not a range. The pin matters twice over:
+**We build a modified sing-box, and say so here because GPLv3 § 5(a) requires it.**
+The patch is dated `2026-09-04`, every file it touches carries a modification
+notice in its own header, and § 2 below is the recipe that turns the upstream tag
+plus that patch into the exact engine we ship. The upstream tag alone will **not**
+reproduce our artefact — see § 2.4.
 
-- **API.** Every sing-box release may change `LibboxPlatformInterface` method
-  signatures. `ExtensionPlatformInterface.m` implements that protocol against
-  `v1.13.13`'s generated `Libbox.objc.h`; a different tag may not compile, or
-  may compile and mis-bridge.
-- **Config schema.** The tunnel passes its configuration JSON through to libbox
-  **verbatim** — it never generates or rewrites sing-box JSON. The configuration
-  is a sing-box **1.13.x**-schema document (typed DNS servers, `sniff` /
-  `hijack-dns` as `route` actions). A major/minor bump on either side needs a
-  coordinated bump on the other.
+| Artefact | Value |
+|---|---|
+| Upstream tag | `v1.13.13` |
+| Upstream commit | `83b73048ff772b919af18653b78ffeaa2d48b66e` |
+| Patch | `singbox-fork/0001-morke-trim.patch` |
+| Patch SHA-256 | `295f7a3e86fb887855cd5f84426f142e49d3666f9bbee435799b3446c9adb5b5` |
+| Version stamped into `constant.Version` | `1.13.13-morke.1` |
+
+### What the patch changes, and why
+
+Three files. Nothing is added to the engine; the patch only removes reachable
+surface and records that it did.
+
+- **`include/registry.go`** — the protocol registry. Upstream registers every
+  protocol it ships. Morke's client refuses all but four egress types
+  (`vless`, `direct`, `block`, `dns`), one ingress type (`tun`), no `endpoints` at
+  all, and no `experimental` key but `cache_file`, in a fail-closed check that runs
+  before any configuration reaches libbox. Everything outside that set was
+  unreachable code in a shipped build, so it is no longer registered: the SOCKS,
+  HTTP, mixed, Shadowsocks, VMess, Trojan, ShadowTLS, AnyTLS, redirect and TProxy
+  inbounds; the SOCKS, HTTP, Shadowsocks, VMess, Trojan, Tor, SSH, ShadowTLS,
+  AnyTLS, selector and urltest outbounds; the `ssm-api` service; the
+  `cloudflare-origin-ca` certificate provider. An unexpected type now fails to
+  decode instead of being constructed.
+- **`cmd/internal/build_libbox/main.go`** — the build script. The optional-feature
+  tags drop to `with_gvisor,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0`
+  (+ `grpcnotrace` on Darwin, + `with_low_memory` off macOS), the Apple bind target
+  drops the two tvOS slices nothing links, and the version stamp stops shelling out
+  to `git describe` so the build no longer depends on VCS state.
+- **`cmd/internal/sizeprobe/main.go`** — new, 14 lines. A `main` package that
+  imports nothing but `experimental/libbox`, so the effect of a tag or registry
+  change on the linked set can be measured in seconds instead of a full
+  `gomobile bind`. Not required to build the extension; published because it is
+  how the removals above were verified.
+
+### Tags kept, and one kept deliberately
+
+`with_gvisor` is required: the iOS kill switch sets `includeAllNetworks`, with which
+sing-box's `system` and `mixed` TUN stacks are incompatible, so `tun.stack` becomes
+`gvisor`. `with_utls` is required: REALITY is built on uTLS, and removing it removes
+the proxy.
+
+**`with_clash_api` is retained, and that is not an oversight.** Turning it off breaks
+every start. `daemon/instance.go` passes a `PlatformLogWriter` to `box.New`
+unconditionally; `box.go` treats a non-nil `PlatformLogWriter` as *needs the Clash
+API*, calls `experimental.NewClashServer`, and without the tag that constructor is
+nil and returns `os.ErrInvalid` — so `box.New` fails with
+`create clash-server: invalid argument`. Unlinking the package would additionally
+require editing `daemon/started_service.go`, which imports `experimental/clashapi`
+with no build tag at all. Neither change is in this patch. The Clash control server
+is nonetheless unreachable in the shipped product: it is only constructed from an
+`experimental.clash_api` block, and the client refuses any `experimental` key but
+`cache_file` before the configuration is handed to libbox.
 
 ---
 
 ## 2. Build `Libbox.xcframework` from source
 
-No prebuilt releases exist; the framework is built from the pinned tag.
+No prebuilt releases exist; the framework is built from the pinned tag plus the patch.
 
 **Prerequisites**
 
-- Go ≥ 1.22
+- Go ≥ 1.22 — the published artefact was built with **go1.26.4 darwin/arm64**
 - Xcode with the full command-line tools — `xcode-select -p` must point at
-  `Xcode.app`, not at the CommandLineTools stub.
+  `Xcode.app`, not at the CommandLineTools stub. The published artefact was built
+  with **Xcode 26.4.1 (17E202)**.
 
 > **sing-box uses its own gomobile fork** (`github.com/sagernet/gomobile`),
-> installed by `make lib_install`. Upstream `golang.org/x/mobile/cmd/gomobile`
-> is **incompatible**. The Makefile target is **`lib_apple`** — there is no
-> `lib_ios` target.
+> installed by `make lib_install` — pinned at `v0.1.12`. Upstream
+> `golang.org/x/mobile/cmd/gomobile` is **incompatible**. The Makefile target is
+> **`lib_apple`** — there is no `lib_ios` target.
+
+### 2.1 The recipe
 
 ```sh
 git clone --branch v1.13.13 https://github.com/SagerNet/sing-box.git
 cd sing-box
+git checkout 83b73048ff772b919af18653b78ffeaa2d48b66e
 
-# 1. Install SagerNet's gomobile/gobind fork into GOPATH/bin
+# 1. Apply the Morke patch series
+patch -p1 < <path-to-this-repo>/singbox-fork/0001-morke-trim.patch
+
+# 2. Install SagerNet's gomobile/gobind fork into GOPATH/bin
 make lib_install
 export PATH="$PATH:$(go env GOPATH)/bin"
 
-# 2. Build the Apple xcframework (iOS device + simulator, macOS, tvOS)
+# 3. Build the Apple xcframework (iOS device + simulator, macOS)
 #    Runs: go run ./cmd/internal/build_libbox -target apple
 #    Takes several minutes; downloads many Go modules on first run.
 make lib_apple
 
-# 3. Place the output where the Xcode project expects it
+# 4. Place the output where the Xcode project expects it
 find . -maxdepth 2 -name "Libbox.xcframework"
 mv Libbox.xcframework <morke-tree>/Frameworks/Libbox.xcframework
 ```
@@ -65,23 +122,55 @@ mv Libbox.xcframework <morke-tree>/Frameworks/Libbox.xcframework
 `gomobile` itself is BSD-3-Clause. Its licence governs the **tool**, not the
 sing-box code it wraps; the output is GPL-3.0-or-later like its input.
 
+### 2.2 What it produces
+
+Three slices, not five. Upstream's `build_libbox` also emits `tvos-arm64` and
+`tvos-arm64_x86_64-simulator`; there is no tvOS target in the Xcode project, so
+those two were never linked into any shipped binary.
+
+| Slice | `Libbox` (static library) |
+|---|---|
+| `ios-arm64` | 41 759 144 bytes |
+| `ios-arm64_x86_64-simulator` | 81 359 344 bytes |
+| `macos-arm64_x86_64` | 108 408 328 bytes |
+
 **The product is a static library.**
 `Libbox.xcframework/ios-arm64/Libbox.framework/Libbox` is an `ar` archive —
 `file(1)` says so. There is no dynamic-linking ambiguity here, which is why
 § 5(c) reaches the whole extension.
 
-### Recording the artefact digest
+### 2.3 Verifying the artefact — this build IS reproducible
+
+Two builds of this source, from different directories on different runs, produce
+`Libbox` files that are **identical except for three bytes**: the ASCII mtime that
+`libtool` stamps into the `__.SYMDEF` member header of the `ar` archive. Blank the
+member mtimes and the digest is stable.
+
+`singbox-fork/libbox-digest.py` does exactly that and nothing else — 40 lines,
+stdlib only, no network, readable in a minute:
 
 ```sh
-find Libbox.xcframework -type f -print0 \
-  | LC_ALL=C sort -z \
-  | xargs -0 shasum -a 256 \
-  | shasum -a 256
+python3 singbox-fork/libbox-digest.py \
+  Libbox.xcframework/*/Libbox.framework/Versions/A/Libbox
 ```
 
-See [README.md § Provenance](README.md#provenance-and-what-it-does-not-prove)
-for exactly what publishing that digest does and does not establish. It is not a
-claim about the App Store binary.
+Expected, for the engine shipped with this tag:
+
+| Slice | Canonical SHA-256 |
+|---|---|
+| `ios-arm64` | `914762d253683aa3dd6e3aa8c05dced89b376cb5f848fda727f6db781863e9c4` |
+| `ios-arm64_x86_64-simulator` | `9da5ded81a894e46eac647e0d616cc21f0f6dcbf851db477af0d380d757a2b26` |
+| `macos-arm64_x86_64` | `e37d577ee6b8b9936f824c6968cb2cd8a1868346c8ed85b86eba036f3f641f76` |
+
+A plain `shasum -a 256` of the same files will **not** match between builds, by
+exactly those three bytes per slice. That is a property of `libtool`, not of the
+source.
+
+### 2.4 If you build the upstream tag instead
+
+You will get a different, larger artefact, and no digest above will match — that is
+correct and expected. The upstream tag is the base, not the engine we ship. Apply
+the patch.
 
 ---
 

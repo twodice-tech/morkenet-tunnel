@@ -128,24 +128,43 @@ than tidiness.
 
 ### D. Authored for this repository
 
-`LICENSE` · `README.md` · `BUILD.md` · `MANIFEST.md`
+`LICENSE` · `COPYING-SCOPE.md` · `README.md` · `BUILD.md` · `MANIFEST.md` ·
+`singbox-fork/0001-morke-trim.patch` · `singbox-fork/libbox-digest.py`
 
-Not exported from the Morke tree; written for publication. `LICENSE` carries a
-scope notice followed by the verbatim GNU GPL v3 text — its GPL body is
-byte-identical to the copy the application ships in
-**Settings → Legal → Open-source licences**, which is checkable:
+Not exported from the Morke tree; written for publication. `LICENSE` is the
+verbatim GNU GPL v3 text and **nothing else** — the scope notice that used to
+precede it moved to `COPYING-SCOPE.md` on 2026-09-05, because a preamble in front
+of the text defeats automatic licence detection. The file is byte-identical to
+the copy the application ships in **Settings → Legal → Open-source licences**,
+which is checkable, and the digest is unchanged by the move because only the
+preamble was removed:
 
 ```sh
-tail -n 674 LICENSE | shasum -a 256
+shasum -a 256 LICENSE
 # 8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903
 ```
+
+**`singbox-fork/` is a GPLv3 § 1 obligation, not a convenience.** From
+2026-09-04 the extension links a **modified** sing-box, so the Corresponding
+Source is our modified tree — not upstream's tag. The patch is that
+modification, expressed against the upstream commit so it can be reviewed in one
+sitting rather than as a re-published 8 MB tree, and applying it to
+`83b73048ff772b919af18653b78ffeaa2d48b66e` reproduces our engine source exactly.
+
+| File | SHA-256 |
+|---|---|
+| `singbox-fork/0001-morke-trim.patch` | `295f7a3e86fb887855cd5f84426f142e49d3666f9bbee435799b3446c9adb5b5` |
+| `singbox-fork/libbox-digest.py` | `11077befa29a9af88318a54fb451601e918c1b7f01debf3854f33d0b6eb7366b` |
+
+`libbox-digest.py` is the checker for [BUILD.md § 2.3](BUILD.md); it is stdlib
+only, makes no network call and writes nothing.
 
 ### E. Excluded, deliberately
 
 | Not published | Why |
 |---|---|
 | `Morke.xcodeproj/` | configures targets outside the perimeter; the covered target's settings are reproduced verbatim in BUILD.md instead |
-| `Frameworks/Libbox.xcframework` | a ~100 MB build product, not source. Rebuild it from tag `v1.13.13` by BUILD.md § 2 |
+| `Frameworks/Libbox.xcframework` | a build product, not source. Rebuild it from tag `v1.13.13` **plus `singbox-fork/0001-morke-trim.patch`** by BUILD.md § 2, and check it against the digests in § 2.3 |
 | `MorkeKit/Sources/{MorkeFeatures,MorkeServices,MorkeModels,MorkeGlobe,MorkeDesignSystem,PlatformKit}` | linked by the app, never by the extension |
 | `MorkeTunnelMac/main.swift` | the macOS system-extension executable host; not compiled into the iOS appex |
 | `MorkeTunnelTests/`, every other test target | not compiled into the extension |
@@ -160,7 +179,7 @@ tail -n 674 LICENSE | shasum -a 256
 Every file in blocks A–C, in one command from the repository root:
 
 ```sh
-find MorkeTunnel MorkeShared macOS -type f ! -name '.DS_Store' -print0 \
+find MorkeTunnel MorkeShared macOS singbox-fork -type f ! -name '.DS_Store' -print0 \
   | LC_ALL=C sort -z | xargs -0 shasum -a 256
 ```
 
@@ -187,7 +206,8 @@ cp MorkeKit/Sources/MorkeShared/*.swift "$OUT/MorkeShared/"
 cp Config/MorkeTunnel-macOS-Info.plist "$OUT/macOS/"
 
 # D — the authored files
-cp publish/tunnel-source/{LICENSE,README.md,BUILD.md,MANIFEST.md} "$OUT/"
+cp publish/tunnel-source/{LICENSE,COPYING-SCOPE.md,README.md,BUILD.md,MANIFEST.md} "$OUT/"
+cp -R publish/tunnel-source/singbox-fork "$OUT/"
 ```
 
 The first `find` is the rule expressed as a command: `MorkeTunnel/` is a
