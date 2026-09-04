@@ -88,10 +88,25 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/inter
  	args := []string{
 diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/internal/sizeprobe/main.go sing-box-morke/cmd/internal/sizeprobe/main.go
 --- a/cmd/internal/sizeprobe/main.go	1970-01-01 01:00:00
-+++ b/cmd/internal/sizeprobe/main.go	2026-09-04 11:04:27
-@@ -0,0 +1,13 @@
-+// Size probe: links exactly what experimental/libbox links, so tag/registry changes
-+// can be measured in seconds instead of a full gomobile bind.
++++ b/cmd/internal/sizeprobe/main.go	2026-09-04 16:48:38
+@@ -0,0 +1,28 @@
++// Added on 2026-09-04 by Two Dice Ltd for the Morke VPN client — part of the same modification
++// of sing-box v1.13.13 recorded in the headers of the other files this patch touches.
++//
++// Copyright (C) 2026 Two Dice Ltd
++//
++// This file is part of a modified copy of sing-box and is released under the GNU General Public
++// License version 3 or (at your option) any later version — the same terms as the work it is
++// added to.
++
++// Command sizeprobe links exactly what experimental/libbox links, so the effect of a build-tag or
++// registry change on the LINKED SET can be measured in seconds instead of a full `gomobile bind`.
++// It is how the removals in include/registry.go were verified, one at a time, against real binary
++// sizes rather than against what looked unused.
++//
++// It is NOT required to generate, install or run MorkeTunnel.appex, and nothing imports it: it is
++// its own `main`, so it changes neither Libbox.xcframework nor any published digest. It is
++// published because a claim about what was removed is worth more with the instrument beside it.
 +package main
 +
 +import (

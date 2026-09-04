@@ -28,7 +28,7 @@ reproduce our artefact — see § 2.4.
 | Upstream tag | `v1.13.13` |
 | Upstream commit | `83b73048ff772b919af18653b78ffeaa2d48b66e` |
 | Patch | `singbox-fork/0001-morke-trim.patch` |
-| Patch SHA-256 | `295f7a3e86fb887855cd5f84426f142e49d3666f9bbee435799b3446c9adb5b5` |
+| Patch SHA-256 | `10d148d7f1e13ae51c7d1132c3ce47646a040cfadef2b1565fef2595413e0641` |
 | Version stamped into `constant.Version` | `1.13.13-morke.1` |
 
 ### What the patch changes, and why
@@ -52,11 +52,15 @@ surface and records that it did.
   (+ `grpcnotrace` on Darwin, + `with_low_memory` off macOS), the Apple bind target
   drops the two tvOS slices nothing links, and the version stamp stops shelling out
   to `git describe` so the build no longer depends on VCS state.
-- **`cmd/internal/sizeprobe/main.go`** — new, 14 lines. A `main` package that
-  imports nothing but `experimental/libbox`, so the effect of a tag or registry
-  change on the linked set can be measured in seconds instead of a full
-  `gomobile bind`. Not required to build the extension; published because it is
-  how the removals above were verified.
+- **`cmd/internal/sizeprobe/main.go`** — new. A `main` package that imports
+  nothing but `experimental/libbox`, so the effect of a tag or registry change on
+  the linked set can be measured in seconds instead of a full `gomobile bind`.
+  It is how the removals above were verified, one at a time, against real binary
+  sizes rather than against what looked unused. Not required to generate, install
+  or run the extension, and **it cannot affect the digests in § 2.3**: nothing
+  imports it — `go list -deps ./experimental/libbox` does not mention it — so it
+  is never linked into `Libbox.xcframework`. Published because a claim about what
+  was removed is worth more with the instrument beside it.
 
 ### Tags kept, and one kept deliberately
 

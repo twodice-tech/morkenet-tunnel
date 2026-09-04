@@ -13,7 +13,7 @@ offer the source. This is that offer, discharged by publication.
 
 **Pinned engine: sing-box `v1.13.13`, modified.** We do not ship upstream's build.
 The engine is trimmed to the protocols this client can actually reach, and the
-modification is published here as a 271-line patch against upstream commit
+modification is published here as a 286-line patch against upstream commit
 `83b73048ff772b919af18653b78ffeaa2d48b66e` — see
 [`singbox-fork/`](singbox-fork/) and [BUILD.md § 1](BUILD.md). GPLv3 § 5(a)
 requires us to say that the work is modified and to date it; that date is
@@ -117,7 +117,7 @@ this application without prior consent."* It is a § 7(e)-style declining of
 trademark rights and it restricts none of the freedoms the GPL grants.
 
 The full texts of all of these are also reproduced inside the shipped
-application, under **Settings → Legal → Open-source licences**, so that a
+application, under **Settings → About → Legal → Licences**, so that a
 recipient who never visits this repository still receives them.
 
 ## Provenance, and what it does not prove

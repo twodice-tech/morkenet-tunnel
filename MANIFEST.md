@@ -135,7 +135,7 @@ Not exported from the Morke tree; written for publication. `LICENSE` is the
 verbatim GNU GPL v3 text and **nothing else** — the scope notice that used to
 precede it moved to `COPYING-SCOPE.md` on 2026-09-05, because a preamble in front
 of the text defeats automatic licence detection. The file is byte-identical to
-the copy the application ships in **Settings → Legal → Open-source licences**,
+the copy the application ships in **Settings → About → Legal → Licences**,
 which is checkable, and the digest is unchanged by the move because only the
 preamble was removed:
 
@@ -153,7 +153,7 @@ sitting rather than as a re-published 8 MB tree, and applying it to
 
 | File | SHA-256 |
 |---|---|
-| `singbox-fork/0001-morke-trim.patch` | `295f7a3e86fb887855cd5f84426f142e49d3666f9bbee435799b3446c9adb5b5` |
+| `singbox-fork/0001-morke-trim.patch` | `10d148d7f1e13ae51c7d1132c3ce47646a040cfadef2b1565fef2595413e0641` |
 | `singbox-fork/libbox-digest.py` | `11077befa29a9af88318a54fb451601e918c1b7f01debf3854f33d0b6eb7366b` |
 
 `libbox-digest.py` is the checker for [BUILD.md § 2.3](BUILD.md); it is stdlib
