@@ -187,7 +187,7 @@ target's own build configuration is reproduced here **verbatim** instead, which
 is what § 1 actually asks for — the settings that produced the object code.
 
 Both configurations, copied from the project's `XCBuildConfiguration` blocks for
-the `MorkeTunnel` target as of `MARKETING_VERSION = 26` / `CURRENT_PROJECT_VERSION = 0.2.6`:
+the `MorkeTunnel` target as of `MARKETING_VERSION = 26.0.0` / `CURRENT_PROJECT_VERSION = 1`:
 
 ```
 CLANG_COVERAGE_MAPPING                  = NO
@@ -195,7 +195,7 @@ CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = NO
 CODE_SIGN_ENTITLEMENTS                  = MorkeTunnel/MorkeTunnel.entitlements
 CODE_SIGN_IDENTITY                      = "Apple Development"
 CODE_SIGN_STYLE                         = Automatic
-CURRENT_PROJECT_VERSION                 = 0.2.6
+CURRENT_PROJECT_VERSION                 = 1
 DEVELOPMENT_TEAM                        = VM3XX8889Q
 ENABLE_DEBUG_DYLIB                      = NO
 GENERATE_INFOPLIST_FILE                 = NO
@@ -205,7 +205,7 @@ IPHONEOS_DEPLOYMENT_TARGET              = 17.0
 LD_RUNPATH_SEARCH_PATHS                 = ("$(inherited)",
                                            "@executable_path/Frameworks",
                                            "@executable_path/../../Frameworks")
-MARKETING_VERSION                       = 26
+MARKETING_VERSION                       = 26.0.0
 PRODUCT_BUNDLE_IDENTIFIER               = tech.twodice.morke.tunnel
 PRODUCT_NAME                            = "$(TARGET_NAME)"
 SKIP_INSTALL                            = YES
@@ -276,6 +276,7 @@ under your own Team ID means changing all of the identifiers above consistently.
 | `NetworkExtension.framework` | system |
 | `UIKit.framework` | system |
 | `libresolv.tbd` | system |
+| `WidgetKit.framework` | system — not in the target's link phase; linked through `import WidgetKit` in `PacketTunnelProvider.swift`, whose `stopTunnel` refreshes the app's widget and Control Center control |
 
 **Nothing else may be added to this list.** The Packet-Tunnel process runs under
 a tight memory budget, so the extension's link set is a budget, not a module

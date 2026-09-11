@@ -77,9 +77,36 @@ public nonisolated enum AppGroup {
     // it was about using one as an app↔EXTENSION channel, which on macOS is impossible (containerURL
     // resolves PER USER and the sysext runs as root; see macOSAuthenticatedKey above). Nothing added
     // below crosses that boundary: the re-arm intent is written and read by the APP process only.
-    private static func defaultContainer() -> URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
+    // T-EXT-0 widened this from `private` to module-internal, byte-unchanged otherwise, so the
+    // VPN-surface store in VPNSurfaceState.swift resolves the container through the SAME function
+    // rather than growing a second copy of it — one derivation, and one place where fail-closed on
+    // an unresolvable container is decided. Still not public: outside MorkeShared the container is
+    // reached only through the helpers that already carry that discipline.
+    static func defaultContainer() -> URL? {
+        containerOverride ?? FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
     }
+
+    // TEST SEAM, and it is a `@TaskLocal` for a specific reason (T-EXT-1, 2026-09-08).
+    //
+    // The App-Group document is process-global, and since T-EXT-1 gave HomeFeature a third publish
+    // site every HomeFeature suite writes it as a side effect of reducing. Two consequences, both
+    // measured rather than feared: a suite that ASSERTS on the document fails when another suite
+    // publishes concurrently (swift-testing parallelises within a target — this failed exactly that
+    // way before the seam existed), and a plain test run rewrites the real widget's state on the
+    // simulator or device it ran on.
+    //
+    // This is the same order-dependence T-QA-27 removed from UserDefaults, and it takes the same
+    // answer: per-case isolation, not a shared store. A `@TaskLocal` rather than a mutable static
+    // because parallel cases each need their own value — a `static var` would be the very defect
+    // being fixed — and because it propagates into the child tasks TCA effects run on, which is
+    // where the publish actually happens.
+    //
+    // `nil` in production, always: nothing in the app or the extension sets it, so `defaultContainer`
+    // resolves exactly as it did before. It costs the appex one optional read per container lookup.
+    // `public` because MorkeTests is an Xcode target outside this package, so `package` would not
+    // reach it. It is a seam, not API: the same shape as the `container:` parameter every helper
+    // below already exposes publicly for the same reason.
+    @TaskLocal public static var containerOverride: URL?
 
     // MARK: - On-demand re-arm intent (T-CFG-53)
     //
@@ -125,6 +152,140 @@ public nonisolated enum AppGroup {
         return FileManager.default.fileExists(
             atPath: container.appendingPathComponent(onDemandRearmPendingName).path
         )
+    }
+
+    // MARK: - Surface connect request (T-EXT-0)
+    //
+    // WHAT IT RECORDS: "the user asked for a connect from OUTSIDE the app, and the intent could not
+    // do it here." Only the two refusals whose documented repair is an in-app connect set it — no
+    // profile installed, and no stored config (T-CFG-41). Not `.notSignedIn` (they land on the login
+    // screen, which is its own flow) and not `.busy` (nothing to repair).
+    //
+    // WHY IT EXISTS. Opening the app on Home is a truthful answer but a thin one: the user pressed a
+    // control and the thing they pressed it for did not happen, with no route to the reason. It is
+    // sharpest for an unsubscribed account, where the honest destination is the paywall — and the
+    // intent CANNOT work that out for itself: it runs in a background app process where AuthSession
+    // is empty by construction, so entitlement is unknowable there without a network round trip
+    // inside a toggle. The app, once open, already knows: replaying the connect puts the user through
+    // the SAME gates a Connect tap does, and those gates present the paywall. So this carries the
+    // intent across the process boundary rather than duplicating a judgement in the wrong place.
+    //
+    // AT MOST ONCE, and consumed rather than read: the user asked once. Cleared by the consume, by a
+    // failed silent re-login (no session, nothing to replay), and by TunnelWorkspace.wipe() on
+    // sign-out — so a request can never outlive the account that made it.
+    //
+    // Same file-presence shape and the same best-effort bias as the re-arm intent above: presence IS
+    // the value, an unresolvable container reads false, and a lost write costs one replay rather than
+    // producing one nobody asked for.
+
+    private static let pendingSurfaceConnectName = "surface-connect-pending"
+
+    public static func setPendingSurfaceConnect(_ pending: Bool, container: URL? = nil) {
+        guard let container = container ?? defaultContainer() else { return }
+        let url = container.appendingPathComponent(pendingSurfaceConnectName)
+        if pending {
+            try? Data().write(to: url)
+        } else {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    public static func isPendingSurfaceConnect(container: URL? = nil) -> Bool {
+        guard let container = container ?? defaultContainer() else { return false }
+        return FileManager.default.fileExists(
+            atPath: container.appendingPathComponent(pendingSurfaceConnectName).path
+        )
+    }
+
+
+    // MARK: - Protected-time totals (T-UX-7)
+    //
+    // TWO INTEGERS, and the fact that there are only two is the whole privacy argument. This is a
+    // FOLD, not a log: `sessions` counts how many tunnels this device has run to completion and
+    // `seconds` sums how long they lasted. Neither has an inverse — no reading of the pair recovers
+    // when any session started, when it ended, how long any ONE of them was, or where anyone was
+    // while it ran. A stored ROW per session would recover all of that, which is why
+    // ConnectionMetricsClient refused a per-session buffer and why this is not that refusal
+    // reversed. The document has a FIXED SIZE that does not grow with use; if it ever needs an
+    // array, the thing being added is a log and the answer is no.
+    //
+    // WHY THE EXTENSION OWNS IT, and it is the only process that can. The app observes NEVPNStatus
+    // only while it is running: a tunnel raised on demand and dropped hours later, with the app
+    // suspended the whole time — which is the ordinary case for a VPN nobody has to think about —
+    // is invisible to it. This process brackets exactly one session, start to stop, so it is the
+    // one witness that can measure the session at all. The app never writes `add`; the extension
+    // never writes `clear`. One writer per operation, so a read-modify-write cannot lose an update
+    // — the exception is a reset racing a stop, which costs one session and is stated at `clear`.
+    //
+    // WHAT THE NUMBER MEANS, exactly, so nothing over-claims: the EXTENSION'S OWN UPTIME, from the
+    // moment iOS handed it a start to the moment it was stopped. It therefore includes the second
+    // or two of setup before traffic flows, and it counts NOTHING for a session ended by a crash,
+    // a jetsam kill or a reboot, where `stopTunnel` never runs. Both directions are small and the
+    // second is the larger; the total is a close lower bound, never an inflated one.
+    //
+    // ⚠️ `seconds` MUST come from a MONOTONIC clock at the call site, never from two `Date()`
+    // readings. A wall-clock correction mid-session would otherwise fold a jump straight into a
+    // total the user can only fix by resetting it. See PacketTunnelProvider.stopTunnel.
+    //
+    // NOT A SECRET, so the App-Group rule at the top of VPNSurfaceState.swift is satisfied by
+    // construction: two counters carry no destination, no address and no credential. Nothing reads
+    // this but the app's own Settings screen — the widget and the Control Center control do not,
+    // and must not start: what they render is the CURRENT connection, not a history of them.
+
+    public struct ProtectedTimeTotals: Codable, Sendable, Equatable {
+        // Sessions this device ran to a delivered stop. See the header for what it cannot count.
+        public var sessions: Int
+        // Their summed duration in whole seconds. Whole seconds because nothing on screen is finer
+        // than a minute, and an Int cannot carry a fraction that hints at one session's exact length.
+        public var seconds: Int
+
+        public init(sessions: Int = 0, seconds: Int = 0) {
+            self.sessions = sessions
+            self.seconds = seconds
+        }
+    }
+
+    private static let protectedTimeTotalsName = "protected-time-totals.json"
+
+    // THE EXTENSION'S WRITE, and the only one. Best-effort throughout (`try?`, never throws): this
+    // is called from stopTunnel, which runs on a deadline and may not be blocked or failed by a
+    // statistic. A lost write costs one session out of a running total.
+    //
+    // A non-positive duration is DROPPED rather than clamped to zero and counted: it means the
+    // measurement itself is unusable (no recorded start), and counting a session whose length we do
+    // not know would inflate `sessions` against a `seconds` that never moved.
+    public static func addProtectedSession(seconds: Int, container: URL? = nil) {
+        guard seconds > 0 else { return }
+        guard let container = container ?? defaultContainer() else { return }
+        var totals = readProtectedTimeTotals(container: container)
+        totals.sessions += 1
+        totals.seconds += seconds
+        guard let data = try? JSONEncoder().encode(totals) else { return }
+        try? data.write(to: protectedTimeTotalsURL(container), options: .atomic)
+    }
+
+    // Read by the app. Every failure — unresolvable container, absent file, undecodable file —
+    // answers ZEROS rather than nil, because there is exactly one honest thing to say when we have
+    // no measurement and it is "nothing counted yet". A caller cannot act on the difference.
+    public static func readProtectedTimeTotals(container: URL? = nil) -> ProtectedTimeTotals {
+        guard let container = container ?? defaultContainer() else { return ProtectedTimeTotals() }
+        guard let data = try? Data(contentsOf: protectedTimeTotalsURL(container)) else {
+            return ProtectedTimeTotals()
+        }
+        return (try? JSONDecoder().decode(ProtectedTimeTotals.self, from: data)) ?? ProtectedTimeTotals()
+    }
+
+    // The app's reset, and the one write the extension never makes. A stop landing in the same
+    // instant can leave that session counted on the far side of the reset; it costs one session and
+    // the user can press reset again, which is why it is not worth a lock across two processes.
+    // Also called from the sign-out / account-deletion scrub — see SettingsFeature.runLocalScrub.
+    public static func clearProtectedTimeTotals(container: URL? = nil) {
+        guard let container = container ?? defaultContainer() else { return }
+        try? FileManager.default.removeItem(at: protectedTimeTotalsURL(container))
+    }
+
+    private static func protectedTimeTotalsURL(_ container: URL) -> URL {
+        container.appendingPathComponent(protectedTimeTotalsName)
     }
 
     #if os(iOS)

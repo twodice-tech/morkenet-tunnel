@@ -25,6 +25,7 @@
 
 import NetworkExtension
 import OSLog
+import WidgetKit
 import MorkeShared
 
 // os_log destination for all Network Extension lifecycle events.
@@ -48,6 +49,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var startedAt: Date?
     // T-INFRA-27: size of the config this start ran, in BYTES. Never the config.
     private var configBytes: Int?
+    // T-UX-7: the measurement base for this session's length, on a MONOTONIC axis rather than the
+    // wall clock. `startedAt` above cannot serve — it is a `Date`, so an NTP correction or a user
+    // clock change mid-session would be folded straight into a lifetime total the user could only
+    // repair by resetting it. `ContinuousClock` keeps running across system sleep, which is exactly
+    // what a tunnel that stays up overnight needs, and a reboot (which would reset the axis) also
+    // kills this process, so no session can span one. It is not a timestamp: an instant on an
+    // arbitrary monotonic axis says nothing about when anything happened, and it never leaves
+    // memory. Written and read on the provider queue only, like the two above.
+    private var startedAtMonotonic: ContinuousClock.Instant?
 
     override init() {
         log.notice("PacketTunnelProvider: init")
@@ -217,6 +227,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         // T-INFRA-27: both set on the provider queue, before the handoff below, so the background
         // closure never mutates provider state off-queue.
         startedAt = Date()
+        startedAtMonotonic = ContinuousClock.now
         configBytes = configData.count
         // `self` (the NE provider) and `completionHandler` are non-Sendable, but this is a single,
         // one-shot handoff onto the background queue: start() runs exactly once, `self` is used only
@@ -289,12 +300,110 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         TunnelDiagnostics.record(.stopped, detail: reason.rawValue)
         singBox?.stop()
         singBox = nil
+        publishStoppedToSurfaces()
+        recordProtectedSession()
         // T-INFRA-27: startedAt / configBytes are deliberately NOT cleared. `running` already says
         // the engine is gone (it reads `singBox != nil`), and what the report needs from a live but
         // idle extension is WHEN the last tunnel ran in it — clearing them made the report say "no
         // tunnel started in it" directly above an event ring showing a start and a stop seconds
         // earlier, which is the one thing a diagnostic must never do (maintainer, 2026-08-17).
         completionHandler()
+    }
+
+    // MARK: - Telling the out-of-app surfaces the tunnel is down (T-EXT-1)
+    //
+    // ⚠️ THIS IS THE ONE PLACE THAT KNOWS. Device-found 2026-09-08: with the app swiped away, turning
+    // the VPN off in Settings or Control Center left the widget counting a live timer — asserting
+    // protection that did not exist — because the App-Group document is written only by the APP, and
+    // a suspended app runs no NEVPNStatus observer. The log is unambiguous: `stopTunnel: reason 1` at
+    // 18:22:38 with not one `Morke` line after it. Nothing on the widget's side can fix that; the
+    // document is the only channel, and this process is the only witness left awake.
+    //
+    // WHY THIS CROSSES TWO RULES ON PURPOSE, both of them ours:
+    //   • T-EXT-0 scoped extension-publishing OUT, and VPNSurfacePublisher's header still records the
+    //     consequence it accepted. The consequence turned out to be worse in the STOP direction than
+    //     the header imagined for the START one — a stale "connected" is not a surface lagging, it is
+    //     a VPN telling someone they are protected when they are not.
+    //   • The appex's link set is audited to MorkeShared alone under a memory tier whose enforced
+    //     metric is unresolved (T-CFG-16). `AppGroup` is already in MorkeShared, so the WRITE adds no
+    //     link; `WidgetCenter` does add WidgetKit, and that was taken as a measured decision against a
+    //     baseline of 16.5–21.2 MiB for this process (five Activity Monitor windows, 2026-09-08) —
+    //     not as an assumption that a system framework is free. If the number moved, the reload goes
+    //     and the widget polls for it instead.
+    //
+    // Deliberately narrow: status and connection start only. This process knows neither node nor
+    // ping, and `updateVPNSurfaceState` merges, so the widget keeps showing the server it had.
+    // Best-effort by construction — stopTunnel is on a deadline and nothing here may block it.
+    private func publishStoppedToSurfaces() {
+        AppGroup.updateVPNSurfaceState { state in
+            state.status = .disconnected
+            state.connectedSince = nil
+            state.capturedAt = Date()
+        }
+        WidgetCenter.shared.reloadTimelines(ofKind: VPNSurfaceWidget.kind)
+        // T-EXT-3: the Control Center control has no timeline at all, so this is the only thing that
+        // can take its switch down when a VPN is stopped from outside the app. Same framework, no new
+        // link, same best-effort caveat as the line above — and the same known residual, that this
+        // XPC is sent from a process the system is tearing down and does not always land.
+        //
+        // ⚠️ `#if os(iOS)` AND NOT ONLY `#available`, because this file builds twice. `ControlCenter`
+        // is iOS 18 / macOS 26, and the macOS system extension deploys to macOS 14 — an availability
+        // check alone fails the Mac build outright, which is how this line was caught. There is
+        // nothing to reload there in any case: the surfaces are iOS-only (VPNSurfacePublisher's
+        // header) and the T-MAC section is paused.
+        #if os(iOS)
+        if #available(iOS 18.0, *) {
+            ControlCenter.shared.reloadControls(ofKind: VPNSurfaceWidget.controlKind)
+        }
+        #endif
+        log.notice("stopTunnel: surfaces told — status=1 since=none (T-EXT-1)")
+    }
+
+    // MARK: - Folding this session into the protected-time total (T-UX-7)
+    //
+    // ⚠️ THIS PROCESS IS THE ONLY WITNESS, for the same reason publishStoppedToSurfaces above it is.
+    // The app observes NEVPNStatus only while it is running; a tunnel raised on demand and dropped
+    // hours later with the app suspended is invisible to it — and that is the ORDINARY case for a
+    // VPN nobody has to think about, so an app-side total would be wrong in the case that matters
+    // most. This function brackets exactly one session and adds its length to a running total.
+    //
+    // WHAT IT WRITES IS TWO INTEGERS AND CANNOT BECOME MORE. `AppGroup.addProtectedSession` takes a
+    // duration and nothing else — no start, no end, no node, no reason — so this cannot turn into a
+    // session log even by accident, which is the property the whole feature rests on. Read that
+    // function's header for the argument; it is the decision record, not this call site.
+    //
+    // THE APPEX'S AUDITED LINK SET IS UNTOUCHED: `AppGroup` is already in MorkeShared and already
+    // written from this very function's neighbour, so the marginal cost is one small `Data` encode
+    // and one atomic write of a ~30-byte file — no framework, no timer, no subscription.
+    //
+    // ⚠️ THAT DISTINCTION IS WHY BYTES UP/DOWN ARE NOT HERE — measured 2026-09-09, T-UX-7, so nobody
+    // re-derives it. They ARE reachable: `LibboxStatusMessage` in our own shipped headers carries
+    // `trafficAvailable` / `uplink` / `downlink` / `uplinkTotal` / `downlinkTotal`
+    // (Libbox.objc.h:1051-1055), and those accessors plus `experimental/clashapi/trafficontrol`
+    // survive T-ARCH-31's trim at the SYMBOL level in the shipped ios-arm64 slice (`nm -gU` on
+    // Frameworks/Libbox.xcframework → `proxylibbox_StatusMessage_UplinkTotal_Get` and its
+    // neighbours) — the trim removed registry entries and build tags, and `with_clash_api` was
+    // deliberately retained. What makes them a different KIND of work is how they are delivered:
+    // only through a `LibboxCommandClient` opened against the command server with a `statusInterval`
+    // — a live subscription running for the whole session, not a value that can be read once at
+    // stop — and the totals reset with the engine, so they would have to be folded periodically.
+    // The app process cannot shortcut it either: Libbox.xcframework is linked by the two MorkeTunnel
+    // targets ONLY, never by the app. So surfacing bytes means a subscription plus a timer plus
+    // repeated App-Group writes inside the memory tier whose enforced metric is still unresolved
+    // (T-CFG-16) — which is exactly what a one-shot fold at stop is not. Reachable, priced, and
+    // deliberately not built.
+    //
+    // Best-effort and non-blocking, like everything else on this deadline: no throw, no wait, and a
+    // start we never recorded simply counts nothing rather than guessing a length.
+    private func recordProtectedSession() {
+        guard let startedAtMonotonic else { return }
+        // Monotonic, deliberately — see the property's own comment. `.components.seconds` truncates
+        // toward zero, which is the direction that cannot over-claim.
+        let elapsed = ContinuousClock.now - startedAtMonotonic
+        let seconds = Int(elapsed.components.seconds)
+        self.startedAtMonotonic = nil
+        AppGroup.addProtectedSession(seconds: seconds)
+        log.notice("stopTunnel: protected session recorded — seconds=\(seconds, privacy: .public) (T-UX-7)")
     }
 
     override func sleep(completionHandler: @escaping () -> Void) {

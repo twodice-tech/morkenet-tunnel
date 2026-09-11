@@ -49,31 +49,34 @@ cannot be generated or installed, so they are inside the definition.
 
 ---
 
-## Resolved list — 2026-09-04
+## Resolved list — 2026-09-11
 
 Left column is the path **in this repository**. `MorkeShared/` is published flat;
 in the Morke tree it lives at `MorkeKit/Sources/MorkeShared/`. Nothing else is
 remapped.
 
+**26 files in all:** 14 in block A, 3 in B, 2 in C and 7 in D.
+
 ### A. Compiled into the extension — GPLv3 § 5(c)
 
 | Published path | SHA-256 | Lines |
 |---|---|---|
-| `MorkeTunnel/PacketTunnelProvider.swift` | `cf80648a…56d78e` | 355 |
+| `MorkeTunnel/PacketTunnelProvider.swift` | `10ae8a47…a26390` | 464 |
 | `MorkeTunnel/SingBoxTunnel.swift` | `a95b7fa1…6d1014` | 203 |
 | `MorkeTunnel/ExtensionPlatformInterface.m` | `e27055e9…168479` | 733 |
 | `MorkeTunnel/ExtensionPlatformInterface.h` | `3674c4c1…447ed0` | 57 |
 | `MorkeTunnel/MorkeTunnelNetHelpers.c` | `4458fc8b…add071` | 116 |
 | `MorkeTunnel/MorkeTunnelNetHelpers.h` | `c92c92bf…5ab7d9` | 91 |
 | `MorkeTunnel/MorkeTunnel-Bridging-Header.h` | `f6a7ac93…90f734` | 29 |
-| `MorkeShared/AppGroup.swift` | `bc693a37…017d65` | 234 |
+| `MorkeShared/AppGroup.swift` | `1387f96c…f1d0cc` | 395 |
 | `MorkeShared/MorkeLog.swift` | `7b32cfe7…4693cb` | 59 |
-| `MorkeShared/SharedKeychain.swift` | `d959d9b3…84e6b1` | 329 |
+| `MorkeShared/SharedKeychain.swift` | `007ff3bf…1ddf8a` | 332 |
 | `MorkeShared/SingBoxConfig.swift` | `459f7c60…929e69` | 55 |
 | `MorkeShared/TunnelDiagnostics.swift` | `34ab658f…171161` | 174 |
 | `MorkeShared/TunnelExtensionConstants.swift` | `3bafa2cf…983724` | 59 |
+| `MorkeShared/VPNSurfaceState.swift` | `56da1c95…e95d97` | 235 |
 
-**13 files, 2 494 lines.**
+**14 files, 3 002 lines.**
 
 > **On that number.** The perimeter was measured at **2 079 lines** on
 > 2026-09-04 *before* the GPLv3 § 5(b) notices were written into these files;
@@ -82,6 +85,25 @@ remapped.
 > files — took it to **2 494**. Both numbers are correct for their moment;
 > neither supersedes the other. Quote 2 079 when talking about the size of the
 > code, 2 494 when talking about the size of the files.
+>
+> **Re-measured 2026-09-11: 14 files, 3 002 lines.** That is the 2 494 above plus
+> 508 — `VPNSurfaceState.swift` is new (235 lines, with the same 40-line notice as
+> its neighbours), `AppGroup.swift` grew by 161, `PacketTunnelProvider.swift` by
+> 109 and `SharedKeychain.swift` by 3. No existing notice changed, so the code
+> without notices is 3 002 − (7 × 25 + 7 × 40) = **2 547** lines. For this
+> snapshot quote 2 547 for the code and 3 002 for the files; the 2026-09-04 pair
+> stays correct for its moment.
+
+**One system framework joined the extension's links, and the rule adds no file
+for it.** `PacketTunnelProvider.swift` now imports Apple's `WidgetKit`, so that a
+stopped tunnel refreshes the Morke app's Home Screen widget and Control Center
+control. `WidgetKit.framework` ships with iOS: it is not source in this
+repository and not code we convey, and GPLv3 § 1 says Corresponding Source "does
+not include the work's System Libraries" — the footing `NetworkExtension`,
+`UIKit` and `Foundation` were already on. The rule's *new module* clause is about
+code compiled into the extension from source, and none was added: the extension
+still links `MorkeShared` and `Libbox.xcframework` and nothing else of ours.
+[BUILD.md](BUILD.md) § 3 lists `WidgetKit` with the other system links.
 
 ### B. Build inputs — GPLv3 § 1, required for the shipped iOS extension
 
@@ -223,8 +245,10 @@ grep -rniE 'api\.morkenet|morkenet\.com|https?://|apiKey|secret|password|token' 
 grep -rn 'URLSession' "$OUT"
 ```
 
-Expected on 2026-09-04: no live secret, no API base URL, and no `URLSession`
-anywhere — the extension makes no control-plane call at all. The `https://`
+Expected on 2026-09-11: no live secret, no API base URL, and no `URLSession` in
+any source file — the extension makes no control-plane call at all; the only
+`URLSession` matches are sentences in this repository's documents and in
+`PrivacyInfo.xcprivacy` saying so. The `https://`
 matches are Apple's plist DTD declarations, links in comments, and the GPL's own
 `gnu.org` URL. One real identifier is present and is published knowingly: the
 Apple Team ID `VM3XX8889Q`, in `MorkeShared/SharedKeychain.swift`, as a

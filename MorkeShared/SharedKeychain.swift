@@ -279,8 +279,11 @@ public enum SharedKeychain {
         try loadData(service: service, account: tunnelConfigAccount, accessGroup: accessGroup)
     }
 
-    // Stores (or replaces) the sing-box config. Called by the app on every connect, immediately before
-    // the profile is saved, so the stored bytes are always the ones the profile is about to run.
+    // Stores (or replaces) the sing-box config. Called by the app on every connect, immediately AFTER the
+    // profile is saved and before the tunnel is started, so the stored bytes are always the ones the
+    // profile is about to run. T-CFG-59 moved it to that side of the save: committing it first meant a
+    // thrown saveToPreferences left this store describing one tunnel and the installed profile another,
+    // with no rollback and no launch path that reconciles them.
     public nonisolated static func saveTunnelConfig(_ config: Data) throws {
         let attributes: [String: Any] = [
             kSecClass as String:           kSecClassGenericPassword,
